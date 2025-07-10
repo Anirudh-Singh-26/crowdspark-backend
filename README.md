@@ -67,4 +67,4 @@ npm start
 
 ## 📘 License
 
-MIT © [Your Name]
+MIT © Anirudh Singh Rathore
