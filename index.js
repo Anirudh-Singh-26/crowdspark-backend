@@ -132,8 +132,10 @@ app.post("/login", async (req, res) => {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: "/", // 🔥 make sure this is here too
+      maxAge: 60 * 60 * 1000, // 1 hour
     });
+    
 
     res.status(200).json({ message: "Login successful" });
   } catch (err) {
@@ -176,24 +178,42 @@ app.post("/upload", upload.single("image"), async (req, res) => {
 
 // Protected route
 app.get("/me", verifyToken, async (req, res) => {
+  console.log("👤 [Auth] /me hit with user id:", req.user?.id);
   try {
     const user = await User.findById(req.user.id).select("-password");
     if (!user) return res.status(404).json({ message: "User not found" });
 
     res.json(user);
   } catch (err) {
+    console.error("❌ [Auth] Error in /me:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
 
+
 // Logout
+// BACKEND: Logout Route
 app.post("/logout", (req, res) => {
+  console.log("🔒 [Logout] Incoming logout request");
+  console.log("🍪 Existing token cookie:", req.cookies.token);
+
   res.cookie("token", "", {
     httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+    path: "/", // Ensure it's same path as set in login
     expires: new Date(0),
+    maxAge: 0,
   });
-  res.json({ message: "Logged out successfully" });
+
+  console.log("🚫 [Logout] Cookie cleared");
+
+  res.status(200).json({ message: "Logged out successfully" });
 });
+
+
+
+
 
 // All Campaigns
 app.post("/campaigns", verifyToken, async (req, res) => {
