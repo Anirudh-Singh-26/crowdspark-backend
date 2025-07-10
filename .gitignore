@@ -1,37 +1,4 @@
-# Node modules
 node_modules/
-
-# Logs
-logs/
-*.log
-npm-debug.log*
-
-# Environment variables
 .env
-
-# Runtime data
-pids/
-*.pid
-*.seed
-
-# OS-specific files
-.DS_Store
-Thumbs.db
-
-# Debug
-.vscode/
-.idea/
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-
-# Optional: PM2 process files
-pids/
-*.pid
-*.log
-
-# Coverage & output
-coverage/
-dist/
+.env.*.local
+.gitignore

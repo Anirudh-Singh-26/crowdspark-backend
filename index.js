@@ -12,6 +12,10 @@ const User = require("./models/User");
 const Campaign = require("./models/Campaign");
 const Transaction = require("./models/Transaction");
 const PDFDocument = require("pdfkit");
+const multer = require("multer");
+const cloudinary = require("./middleware/cloudinary");
+const { Readable } = require("stream");
+
 
 dotenv.config();
 if (!process.env.JWT_SECRET || !process.env.MONGO_URI) {
@@ -54,6 +58,17 @@ const generateToken = (user) => {
     { expiresIn: process.env.JWT_EXPIRES_IN }
   );
 };
+
+const rateLimit= require("express-rate-limit");
+
+const limiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  message: "Too many requests, please try again later.",
+});
+
+app.use(limiter);
+
 
 //  Routes
 
@@ -125,6 +140,39 @@ app.post("/login", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+
+// MULTER AND CLOUDINARY
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
+
+app.post("/upload", upload.single("image"), async (req, res) => {
+  try {
+    if (!req.file)
+      return res.status(400).json({ message: "No image provided" });
+
+    const bufferStream = new Readable();
+    bufferStream.push(req.file.buffer);
+    bufferStream.push(null);
+
+    let cld_upload_stream = cloudinary.uploader.upload_stream(
+      { folder: "crowdspark_campaigns" },
+      (error, result) => {
+        if (error) {
+          console.error("Cloudinary upload error:", error);
+          return res.status(500).json({ message: "Upload failed" });
+        }
+        return res.status(200).json({ imageUrl: result.secure_url });
+      }
+    );
+
+    bufferStream.pipe(cld_upload_stream);
+  } catch (err) {
+    console.error("Image upload error:", err);
+    res.status(500).json({ message: "Error uploading image" });
+  }
+});
+
 
 // Protected route
 app.get("/me", verifyToken, async (req, res) => {
@@ -242,34 +290,34 @@ app.post("/create-order", verifyToken, async (req, res) => {
 app.post("/transactions", verifyToken, async (req, res) => {
   const { campaignId, amount, message } = req.body;
 
-  console.log("📥 [Transaction] Incoming request:");
-  console.log("➡️ Body:", { campaignId, amount, message });
-  console.log("👤 User:", req.user);
+  // console.log("📥 [Transaction] Incoming request:");
+  // console.log("➡️ Body:", { campaignId, amount, message });
+  // console.log("👤 User:", req.user);
 
   if (!req.user || !req.user.id) {
-    console.log("⛔ Unauthorized: No user ID");
+    // console.log("⛔ Unauthorized: No user ID");
     return res.status(401).json({ message: "Unauthorized. Invalid token." });
   }
 
   try {
     const campaign = await Campaign.findById(campaignId);
     if (!campaign) {
-      console.log("❌ Campaign not found:", campaignId);
+      // console.log("❌ Campaign not found:", campaignId);
       return res.status(404).json({ message: "Campaign not found" });
     }
 
-    console.log("✅ Campaign found:", campaign.title);
+    // console.log("✅ Campaign found:", campaign.title);
 
     // Update raisedAmount and supporters
     campaign.raisedAmount = (campaign.raisedAmount || 0) + amount;
 
     if (!campaign.supporters.includes(req.user.id)) {
       campaign.supporters.push(req.user.id);
-      console.log("🙋 Added supporter:", req.user.id);
+      // console.log("🙋 Added supporter:", req.user.id);
     }
 
     await campaign.save();
-    console.log("💾 Campaign updated with new amount:", campaign.raisedAmount);
+    // console.log("💾 Campaign updated with new amount:", campaign.raisedAmount);
 
     // Save transaction
     const transaction = await Transaction.create({
@@ -282,7 +330,7 @@ app.post("/transactions", verifyToken, async (req, res) => {
       paymentId: uuidv4(),
     });
 
-    console.log("💳 Transaction saved:", transaction._id);
+    // console.log("💳 Transaction saved:", transaction._id);
 
     // Update user's backedCampaigns
     const user = await User.findById(req.user.id);
@@ -293,7 +341,7 @@ app.post("/transactions", verifyToken, async (req, res) => {
       if (!user.backedCampaigns.includes(campaignId)) {
         user.backedCampaigns.push(campaignId);
         await user.save();
-        console.log("📘 User updated with new backed campaign:", campaignId);
+        // console.log("📘 User updated with new backed campaign:", campaignId);
       }
     }
 
@@ -301,13 +349,13 @@ app.post("/transactions", verifyToken, async (req, res) => {
     const io = req.app.get("io");
     const room = campaign.owner.toString();
 
-    console.log("📡 Emitting 'new_backing' to room:", room);
-    console.log("📦 Payload:", {
-      campaignId,
-      backer: req.user.username,
-      amount,
-      message,
-    });
+    // console.log("📡 Emitting 'new_backing' to room:", room);
+    // console.log("📦 Payload:", {
+    //   campaignId,
+    //   backer: req.user.username,
+    //   amount,
+    //   message,
+    // });
 
     io.to(room).emit("new_backing", {
       campaignId,
@@ -331,7 +379,7 @@ app.post("/transactions", verifyToken, async (req, res) => {
 // /my-campaigns
 app.get("/my-campaigns", verifyToken, async (req, res) => {
   try {
-    console.log("📥 Fetching campaigns for user:", req.user.id);
+    // console.log("📥 Fetching campaigns for user:", req.user.id);
 
     const campaigns = await Campaign.find({ owner: req.user.id }).select(
       "title image goalAmount raisedAmount"
@@ -345,7 +393,7 @@ app.get("/my-campaigns", verifyToken, async (req, res) => {
       raisedAmount: c.raisedAmount ?? 0,
     }));
 
-    console.log("✅ Campaigns returned:", safeCampaigns.length);
+    // console.log("✅ Campaigns returned:", safeCampaigns.length);
 
     res.json(safeCampaigns);
   } catch (err) {
@@ -358,7 +406,7 @@ app.get("/my-campaigns", verifyToken, async (req, res) => {
 // /my-contributions
 app.get("/my-contributions", verifyToken, async (req, res) => {
   try {
-    console.log("📥 Getting contributions for user:", req.user.id);
+    // console.log("📥 Getting contributions for user:", req.user.id);
 
     const transactions = await Transaction.find({
       user: req.user.id,
@@ -367,7 +415,7 @@ app.get("/my-contributions", verifyToken, async (req, res) => {
       .populate("campaign", "title")
       .sort({ createdAt: -1 });
 
-    console.log("✅ Transactions found:", transactions.length);
+    // console.log("✅ Transactions found:", transactions.length);
 
     const contributions = transactions
       .filter((t) => t.campaign) // Skip ones with missing campaign
@@ -378,7 +426,7 @@ app.get("/my-contributions", verifyToken, async (req, res) => {
         date: t.createdAt ? t.createdAt.toISOString().split("T")[0] : "N/A", // fallback if missing
       }));
 
-    console.log("🟢 Final contributions:", contributions);
+    // console.log("🟢 Final contributions:", contributions);
 
     res.json(contributions);
   } catch (err) {
@@ -528,7 +576,7 @@ io.on("connection", (socket) => {
 
   socket.on("join", (userId) => {
     socket.join(userId);
-    console.log(`👥 User ${userId} joined their room`);
+    // console.log(`👥 User ${userId} joined their room`);
   });
 });
 
@@ -567,6 +615,154 @@ app.get("/invoice/:transactionId", verifyToken, async (req, res) => {
     res.status(500).json({ message: "Error generating invoice" });
   }
 });
+
+const RoleRequest = require("./models/RoleRequest");
+
+app.post("/request-campaign-owner", verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+
+    if (!user || user.role !== "backer") {
+      return res
+        .status(403)
+        .json({ message: "Only backers can request upgrade" });
+    }
+
+    // Prevent duplicate pending requests
+    const existing = await RoleRequest.findOne({
+      user: user._id,
+      status: "pending",
+    });
+
+    if (existing) {
+      return res
+        .status(400)
+        .json({ message: "You already have a pending request" });
+    }
+
+    const request = new RoleRequest({ user: user._id });
+    await request.save();
+
+    // console.log(
+    //   `🔔 Backer ${user.username} requested to become a campaign owner`
+    // );
+
+    res.status(200).json({ message: "Request sent to admin" });
+  } catch (err) {
+    console.error("Request error:", err.message);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// GET all upgrade requests
+app.get("/admin/upgrade-requests", verifyToken, async (req, res) => {
+  if (req.user.role !== "admin")
+    return res.status(403).json({ message: "Forbidden" });
+
+  try {
+    const requests = await RoleRequest.find({ status: "pending" }).populate("user");
+    res.json(requests);
+  } catch (err) {
+    console.error("Fetch requests error:", err.message);
+    res.status(500).json({ message: "Failed to fetch requests" });
+  }
+});
+
+// APPROVE a request
+app.post("/admin/upgrade-requests/:id/approve", verifyToken, async (req, res) => {
+  if (req.user.role !== "admin")
+    return res.status(403).json({ message: "Forbidden" });
+
+  try {
+    const request = await RoleRequest.findById(req.params.id);
+    if (!request || request.status !== "pending") {
+      return res.status(404).json({ message: "Request not found" });
+    }
+
+    const user = await User.findById(request.user);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    user.role = "campaignOwner";
+    await user.save();
+
+    request.status = "approved";
+    await request.save();
+
+    res.json({ message: "Request approved" });
+  } catch (err) {
+    console.error("Approval error:", err.message);
+    res.status(500).json({ message: "Failed to approve request" });
+  }
+});
+
+// DELETE (Reject) a request
+app.delete("/admin/upgrade-requests/:id", verifyToken, async (req, res) => {
+  if (req.user.role !== "admin")
+    return res.status(403).json({ message: "Forbidden" });
+
+  try {
+    const request = await RoleRequest.findById(req.params.id);
+    if (!request) {
+      return res.status(404).json({ message: "Request not found" });
+    }
+
+    request.status = "rejected";
+    await request.save();
+
+    res.json({ message: "Request rejected" });
+  } catch (err) {
+    console.error("Rejection error:", err.message);
+    res.status(500).json({ message: "Failed to reject request" });
+  }
+});
+
+
+app.get("/admin/backers", verifyToken, async (req, res) => {
+  if (req.user.role !== "admin")
+    return res.status(403).json({ message: "Forbidden" });
+
+  try {
+    const backers = await User.find({ role: "backer" }).select(
+      "username email _id"
+    );
+    res.json(backers);
+  } catch (err) {
+    console.error("Fetch backers error:", err.message);
+    res.status(500).json({ message: "Failed to fetch backers" });
+  }
+});
+
+app.patch(
+  "/admin/upgrade-to-campaign-owner/:id",
+  verifyToken,
+  async (req, res) => {
+    if (req.user.role !== "admin")
+      return res.status(403).json({ message: "Forbidden" });
+
+    try {
+      const user = await User.findById(req.params.id);
+      if (!user || user.role !== "backer") {
+        return res.status(400).json({ message: "User is not a backer" });
+      }
+
+      user.role = "campaignOwner";
+      await user.save();
+
+      // console.log(`✅ User ${user.username} upgraded to campaignOwner`);
+      res.json({ message: "User upgraded to Campaign Owner successfully" });
+    } catch (err) {
+      console.error("Upgrade error:", err.message);
+      res.status(500).json({ message: "Failed to upgrade user" });
+    }
+  }
+);
+
+
+app.get("/api/ping", (req, res) => {
+  res.send("pong");
+});
+
+
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
