@@ -16,7 +16,6 @@ const multer = require("multer");
 const cloudinary = require("./middleware/cloudinary");
 const { Readable } = require("stream");
 
-
 dotenv.config();
 if (!process.env.JWT_SECRET || !process.env.MONGO_URI) {
   throw new Error("Missing critical environment variables");
@@ -30,24 +29,39 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
 
-
-
 const app = express();
 app.use(express.json());
 app.use(cookieParser());
-// app.use(
-//   cors({
-//     origin: [process.env.FRONTEND_URL, "https://crowdspark-frontend-gamma.vercel.app"],
-//     credentials: true,
-//   })
-// );
+
+// --------------------- CORS CONFIG (ALLOW SPECIFIC ORIGINS + CREDENTIALS) ---------------------
+const allowedOrigins = [
+  process.env.FRONTEND_URL || "http://localhost:5173",
+  "https://crowdspark-frontend-gamma.vercel.app",
+  // add other allowed frontend origins here if needed
+];
+
 app.use(
   cors({
-    origin: "*",
+    origin: function (origin, callback) {
+      // allow requests with no origin (like mobile apps, Postman, server-to-server)
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.indexOf(origin) !== -1) {
+        return callback(null, true);
+      }
+      return callback(new Error("CORS policy: This origin is not allowed"));
+    },
+    credentials: true, // enable Access-Control-Allow-Credentials
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "Accept",
+      "X-Requested-With",
+    ],
+    optionsSuccessStatus: 200,
   })
 );
-
-
+// -----------------------------------------------------------------------------------------------
 
 const uri = process.env.MONGO_URI;
 mongoose
@@ -65,16 +79,15 @@ const generateToken = (user) => {
   );
 };
 
-const rateLimit= require("express-rate-limit");
+const rateLimit = require("express-rate-limit");
 
 const limiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minutes
-  max: 200, // limit each IP to 100 requests per windowMs
+  max: 200, // limit each IP to 200 requests per windowMs
   message: "Too many requests, please try again later.",
 });
 
 app.use(limiter);
-
 
 //  Routes
 
@@ -109,8 +122,8 @@ app.post("/register", async (req, res) => {
       secure: process.env.NODE_ENV === "production",
       sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
       maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: "/",
     });
-    
 
     res.status(201).json({ message: "Registered successfully" });
   } catch (err) {
@@ -138,17 +151,15 @@ app.post("/login", async (req, res) => {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-      path: "/", // 🔥 make sure this is here too
+      path: "/", // ensure cookie path matches
       maxAge: 60 * 60 * 1000, // 1 hour
     });
-    
 
     res.status(200).json({ message: "Login successful" });
   } catch (err) {
     res.status(500).json({ message: "Server error" });
   }
 });
-
 
 // MULTER AND CLOUDINARY
 const storage = multer.memoryStorage();
@@ -181,7 +192,6 @@ app.post("/upload", upload.single("image"), async (req, res) => {
   }
 });
 
-
 // Protected route
 app.get("/me", verifyToken, async (req, res) => {
   console.log("👤 [Auth] /me hit with user id:", req.user?.id);
@@ -196,9 +206,7 @@ app.get("/me", verifyToken, async (req, res) => {
   }
 });
 
-
 // Logout
-// BACKEND: Logout Route
 app.post("/logout", (req, res) => {
   console.log("🔒 [Logout] Incoming logout request");
   console.log("🍪 Existing token cookie:", req.cookies.token);
@@ -216,10 +224,6 @@ app.post("/logout", (req, res) => {
 
   res.status(200).json({ message: "Logged out successfully" });
 });
-
-
-
-
 
 // All Campaigns
 app.post("/campaigns", verifyToken, async (req, res) => {
@@ -281,7 +285,6 @@ app.post("/campaigns", verifyToken, async (req, res) => {
 });
 
 // Razor pay Routes
-
 app.post("/create-order", verifyToken, async (req, res) => {
   const { amount } = req.body;
 
@@ -298,54 +301,39 @@ app.post("/create-order", verifyToken, async (req, res) => {
 
   try {
     const order = await razorpay.orders.create(options);
-    res
-      .status(201)
-      .json({
-        orderId: order.id,
-        amount: order.amount,
-        currency: order.currency,
-      });
+    res.status(201).json({
+      orderId: order.id,
+      amount: order.amount,
+      currency: order.currency,
+    });
   } catch (err) {
     console.error("Failed to create Razorpay order:", err);
     res.status(500).json({ message: "Failed to create order" });
   }
 });
 
-
 // All Transactions
 app.post("/transactions", verifyToken, async (req, res) => {
   const { campaignId, amount, message } = req.body;
 
-  // console.log("📥 [Transaction] Incoming request:");
-  // console.log("➡️ Body:", { campaignId, amount, message });
-  // console.log("👤 User:", req.user);
-
   if (!req.user || !req.user.id) {
-    // console.log("⛔ Unauthorized: No user ID");
     return res.status(401).json({ message: "Unauthorized. Invalid token." });
   }
 
   try {
     const campaign = await Campaign.findById(campaignId);
     if (!campaign) {
-      // console.log("❌ Campaign not found:", campaignId);
       return res.status(404).json({ message: "Campaign not found" });
     }
 
-    // console.log("✅ Campaign found:", campaign.title);
-
-    // Update raisedAmount and supporters
     campaign.raisedAmount = (campaign.raisedAmount || 0) + amount;
 
     if (!campaign.supporters.includes(req.user.id)) {
       campaign.supporters.push(req.user.id);
-      // console.log("🙋 Added supporter:", req.user.id);
     }
 
     await campaign.save();
-    // console.log("💾 Campaign updated with new amount:", campaign.raisedAmount);
 
-    // Save transaction
     const transaction = await Transaction.create({
       user: req.user.id,
       campaign: campaignId,
@@ -356,9 +344,6 @@ app.post("/transactions", verifyToken, async (req, res) => {
       paymentId: uuidv4(),
     });
 
-    // console.log("💳 Transaction saved:", transaction._id);
-
-    // Update user's backedCampaigns
     const user = await User.findById(req.user.id);
     if (user) {
       if (!Array.isArray(user.backedCampaigns)) {
@@ -367,21 +352,11 @@ app.post("/transactions", verifyToken, async (req, res) => {
       if (!user.backedCampaigns.includes(campaignId)) {
         user.backedCampaigns.push(campaignId);
         await user.save();
-        // console.log("📘 User updated with new backed campaign:", campaignId);
       }
     }
 
-    // 🔔 Emit real-time notification
     const io = req.app.get("io");
     const room = campaign.owner.toString();
-
-    // console.log("📡 Emitting 'new_backing' to room:", room);
-    // console.log("📦 Payload:", {
-    //   campaignId,
-    //   backer: req.user.username,
-    //   amount,
-    //   message,
-    // });
 
     io.to(room).emit("new_backing", {
       campaignId,
@@ -400,13 +375,9 @@ app.post("/transactions", verifyToken, async (req, res) => {
   }
 });
 
-
-
 // /my-campaigns
 app.get("/my-campaigns", verifyToken, async (req, res) => {
   try {
-    // console.log("📥 Fetching campaigns for user:", req.user.id);
-
     const campaigns = await Campaign.find({ owner: req.user.id }).select(
       "title image goalAmount raisedAmount"
     );
@@ -419,8 +390,6 @@ app.get("/my-campaigns", verifyToken, async (req, res) => {
       raisedAmount: c.raisedAmount ?? 0,
     }));
 
-    // console.log("✅ Campaigns returned:", safeCampaigns.length);
-
     res.json(safeCampaigns);
   } catch (err) {
     console.error("❌ Failed to fetch campaigns:", err.message);
@@ -428,12 +397,9 @@ app.get("/my-campaigns", verifyToken, async (req, res) => {
   }
 });
 
-
 // /my-contributions
 app.get("/my-contributions", verifyToken, async (req, res) => {
   try {
-    // console.log("📥 Getting contributions for user:", req.user.id);
-
     const transactions = await Transaction.find({
       user: req.user.id,
       status: "completed",
@@ -441,18 +407,14 @@ app.get("/my-contributions", verifyToken, async (req, res) => {
       .populate("campaign", "title")
       .sort({ createdAt: -1 });
 
-    // console.log("✅ Transactions found:", transactions.length);
-
     const contributions = transactions
-      .filter((t) => t.campaign) // Skip ones with missing campaign
+      .filter((t) => t.campaign)
       .map((t) => ({
         id: t._id,
         title: t.campaign.title,
         amount: t.amount,
-        date: t.createdAt ? t.createdAt.toISOString().split("T")[0] : "N/A", // fallback if missing
+        date: t.createdAt ? t.createdAt.toISOString().split("T")[0] : "N/A",
       }));
-
-    // console.log("🟢 Final contributions:", contributions);
 
     res.json(contributions);
   } catch (err) {
@@ -461,11 +423,10 @@ app.get("/my-contributions", verifyToken, async (req, res) => {
   }
 });
 
-
-
 // Get all users
 app.get("/admin/users", verifyToken, async (req, res) => {
-  if (req.user.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+  if (req.user.role !== "admin")
+    return res.status(403).json({ message: "Forbidden" });
 
   try {
     const users = await User.find({}, "-password");
@@ -477,7 +438,8 @@ app.get("/admin/users", verifyToken, async (req, res) => {
 
 // Delete user
 app.delete("/admin/users/:id", verifyToken, async (req, res) => {
-  if (req.user.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+  if (req.user.role !== "admin")
+    return res.status(403).json({ message: "Forbidden" });
 
   try {
     await User.findByIdAndDelete(req.params.id);
@@ -489,7 +451,8 @@ app.delete("/admin/users/:id", verifyToken, async (req, res) => {
 
 // Get all campaigns
 app.get("/admin/campaigns", verifyToken, async (req, res) => {
-  if (req.user.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+  if (req.user.role !== "admin")
+    return res.status(403).json({ message: "Forbidden" });
 
   try {
     const campaigns = await Campaign.find().populate("owner", "username");
@@ -501,7 +464,8 @@ app.get("/admin/campaigns", verifyToken, async (req, res) => {
 
 // Delete campaign
 app.delete("/admin/campaigns/:id", verifyToken, async (req, res) => {
-  if (req.user.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+  if (req.user.role !== "admin")
+    return res.status(403).json({ message: "Forbidden" });
 
   try {
     await Campaign.findByIdAndDelete(req.params.id);
@@ -524,7 +488,6 @@ app.get("/campaigns", async (req, res) => {
 app.get("/campaigns/:id", async (req, res) => {
   const { id } = req.params;
 
-  // Validate ID format
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return res.status(400).json({ message: "Invalid campaign ID format" });
   }
@@ -533,7 +496,7 @@ app.get("/campaigns/:id", async (req, res) => {
     const campaign = await Campaign.findById(id).populate(
       "owner",
       "username email"
-    ); // populate optional
+    );
 
     if (!campaign) {
       return res.status(404).json({ message: "Campaign not found" });
@@ -543,26 +506,6 @@ app.get("/campaigns/:id", async (req, res) => {
   } catch (error) {
     console.error("Error fetching campaign details:", error.message);
     res.status(500).json({ message: "Internal server error" });
-  }
-});
-
-// Get campaign by ID
-app.get("/campaigns/:id", async (req, res) => {
-  const { id } = req.params;
-
-  if (!mongoose.Types.ObjectId.isValid(id)) {
-    return res.status(400).json({ message: "Invalid campaign ID format" });
-  }
-
-  try {
-    const campaign = await Campaign.findById(id).populate("owner", "username");
-    if (!campaign) {
-      return res.status(404).json({ message: "Campaign not found" });
-    }
-
-    res.status(200).json(campaign);
-  } catch (err) {
-    res.status(500).json({ message: "Error fetching campaign" });
   }
 });
 
@@ -579,21 +522,20 @@ app.get("/campaigns/:id/transactions", async (req, res) => {
   }
 });
 
-
-
-
-
 const http = require("http");
 const { Server } = require("socket.io");
 
 const server = http.createServer(app);
 
+// --------------------- SOCKET.IO (CORS uses same allowedOrigins) ---------------------
 const io = new Server(server, {
   cors: {
-    origin: [process.env.FRONTEND_URL, "https://crowdspark-frontend-gamma.vercel.app"],
+    origin: allowedOrigins,
     credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   },
 });
+// -----------------------------------------------------------------------------------
 
 app.set("io", io);
 
@@ -602,7 +544,6 @@ io.on("connection", (socket) => {
 
   socket.on("join", (userId) => {
     socket.join(userId);
-    // console.log(`👥 User ${userId} joined their room`);
   });
 });
 
@@ -654,7 +595,6 @@ app.post("/request-campaign-owner", verifyToken, async (req, res) => {
         .json({ message: "Only backers can request upgrade" });
     }
 
-    // Prevent duplicate pending requests
     const existing = await RoleRequest.findOne({
       user: user._id,
       status: "pending",
@@ -669,10 +609,6 @@ app.post("/request-campaign-owner", verifyToken, async (req, res) => {
     const request = new RoleRequest({ user: user._id });
     await request.save();
 
-    // console.log(
-    //   `🔔 Backer ${user.username} requested to become a campaign owner`
-    // );
-
     res.status(200).json({ message: "Request sent to admin" });
   } catch (err) {
     console.error("Request error:", err.message);
@@ -686,7 +622,9 @@ app.get("/admin/upgrade-requests", verifyToken, async (req, res) => {
     return res.status(403).json({ message: "Forbidden" });
 
   try {
-    const requests = await RoleRequest.find({ status: "pending" }).populate("user");
+    const requests = await RoleRequest.find({ status: "pending" }).populate(
+      "user"
+    );
     res.json(requests);
   } catch (err) {
     console.error("Fetch requests error:", err.message);
@@ -695,31 +633,35 @@ app.get("/admin/upgrade-requests", verifyToken, async (req, res) => {
 });
 
 // APPROVE a request
-app.post("/admin/upgrade-requests/:id/approve", verifyToken, async (req, res) => {
-  if (req.user.role !== "admin")
-    return res.status(403).json({ message: "Forbidden" });
+app.post(
+  "/admin/upgrade-requests/:id/approve",
+  verifyToken,
+  async (req, res) => {
+    if (req.user.role !== "admin")
+      return res.status(403).json({ message: "Forbidden" });
 
-  try {
-    const request = await RoleRequest.findById(req.params.id);
-    if (!request || request.status !== "pending") {
-      return res.status(404).json({ message: "Request not found" });
+    try {
+      const request = await RoleRequest.findById(req.params.id);
+      if (!request || request.status !== "pending") {
+        return res.status(404).json({ message: "Request not found" });
+      }
+
+      const user = await User.findById(request.user);
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      user.role = "campaignOwner";
+      await user.save();
+
+      request.status = "approved";
+      await request.save();
+
+      res.json({ message: "Request approved" });
+    } catch (err) {
+      console.error("Approval error:", err.message);
+      res.status(500).json({ message: "Failed to approve request" });
     }
-
-    const user = await User.findById(request.user);
-    if (!user) return res.status(404).json({ message: "User not found" });
-
-    user.role = "campaignOwner";
-    await user.save();
-
-    request.status = "approved";
-    await request.save();
-
-    res.json({ message: "Request approved" });
-  } catch (err) {
-    console.error("Approval error:", err.message);
-    res.status(500).json({ message: "Failed to approve request" });
   }
-});
+);
 
 // DELETE (Reject) a request
 app.delete("/admin/upgrade-requests/:id", verifyToken, async (req, res) => {
@@ -741,7 +683,6 @@ app.delete("/admin/upgrade-requests/:id", verifyToken, async (req, res) => {
     res.status(500).json({ message: "Failed to reject request" });
   }
 });
-
 
 app.get("/admin/backers", verifyToken, async (req, res) => {
   if (req.user.role !== "admin")
@@ -774,7 +715,6 @@ app.patch(
       user.role = "campaignOwner";
       await user.save();
 
-      // console.log(`✅ User ${user.username} upgraded to campaignOwner`);
       res.json({ message: "User upgraded to Campaign Owner successfully" });
     } catch (err) {
       console.error("Upgrade error:", err.message);
@@ -783,12 +723,9 @@ app.patch(
   }
 );
 
-
 app.get("/api/ping", (req, res) => {
   res.send("pong");
 });
-
-
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
