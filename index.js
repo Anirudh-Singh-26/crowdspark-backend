@@ -35,6 +35,7 @@ const razorpay = new Razorpay({
 const app = express();
 app.use(express.json());
 app.use(cookieParser());
+<<<<<<< HEAD
 app.use(
   cors({
     // origin: [process.env.FRONTEND_URL, "https://crowdspark-frontend-gamma.vercel.app"],
@@ -42,6 +43,21 @@ app.use(
     credentials: true,
   })
 );
+=======
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", req.headers.origin || "*");
+  res.header("Access-Control-Allow-Credentials", "true");
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+
+  next();
+});
+
+>>>>>>> fa8d3410167903c1d4ee8a2d8eca4b58b3271da1
 
 
 const uri = process.env.MONGO_URI;
@@ -101,10 +117,11 @@ app.post("/register", async (req, res) => {
 
     res.cookie("token", token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      secure: true,
+      sameSite: "none",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
+
     
 
     res.status(201).json({ message: "Registered successfully" });
