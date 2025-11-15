@@ -43,10 +43,10 @@ app.use(cookieParser());
 // );
 app.use(
   cors({
-    origin: ["*"],
-    credentials: true,
+    origin: "*",
   })
 );
+
 
 
 const uri = process.env.MONGO_URI;
